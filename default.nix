@@ -262,13 +262,12 @@ let
       mkdir $out
       ${nix2container-bin}/bin/nix2container ${subcommand} \
         $out/layers.json \
-        ${closureGraph allDeps} \
+        ${closureGraph allDeps ignore} \
         --max-layers ${toString maxLayers} \
         ${rewritesFlag} \
         ${permsFlag} \
         ${tarDirectory} \
         ${l.concatMapStringsSep " "  (l: l + "/layers.json") layers} \
-        ${l.optionalString (ignore != null) "--ignore ${ignore}"}
       '';
   in checked { inherit copyToRoot contents; } layersJSON;
 
@@ -288,16 +287,24 @@ let
     done;
   '';
 
-  # Write the references of `path' to a file.
-  closureGraph = paths: pkgs.runCommand "closure-graph.json"
+  # Write the references of `path' to a file but do not include `ignore' itself if non-null.
+  closureGraph = paths: ignore:
+  pkgs.runCommand "closure-graph.json"
   {
     exportReferencesGraph.graph = paths;
     __structuredAttrs = true;
     PATH = "${pkgs.jq}/bin";
+    inherit ignore;
+    outputChecks.out = {
+      disallowedReferences = l.optional (ignore != null) ignore;
+    };
     builder = l.toFile "builder"
     ''
       . .attrs.sh
-      jq .graph .attrs.json > ''${outputs[out]}
+      jq --arg ignore "$ignore" \
+        '.graph|map(select(.path != $ignore))' \
+        .attrs.json \
+        > ''${outputs[out]}
     '';
   }
   "";
@@ -360,12 +367,13 @@ let
            else if !builtins.isList derivations
                 then [derivations]
                 else derivations;
-      nixDatabase = makeNixDatabase ([configFile] ++ copyToRootList ++ layers);
+      closureGraphForAllLayers = closureGraph ([configFile] ++ copyToRootList ++ layers) configFile;
+      nixDatabase = makeNixDatabase [closureGraphForAllLayers];
       # This layer contains all config dependencies. We ignore the
       # configFile because it is already part of the image, as a
       # specific blob.
 
-      perms' = perms ++ l.optionals initializeNixDatabase 
+      perms' = perms ++ l.optionals initializeNixDatabase
       [
         {
           path = nixDatabase;
