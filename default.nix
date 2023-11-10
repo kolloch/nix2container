@@ -302,7 +302,7 @@ let
     ''
       . .attrs.sh
       jq --arg ignore "$ignore" \
-        '.graph|map(select(.path != $ignore))' \
+        '.graph|map(select(.path != $ignore)|del(.ca))' \
         .attrs.json \
         > ''${outputs[out]}
     '';
